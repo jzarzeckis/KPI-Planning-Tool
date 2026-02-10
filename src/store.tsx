@@ -322,7 +322,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       entry.pc = pc;
 
       // Post answer to server
-      await fetch("/api/submit-answer", {
+      await fetch("/api/signaling?action=submit-answer", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -352,7 +352,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       hostIdRef.current = hostId;
       isHostRef.current = true;
 
-      const res = await fetch("/api/create-session", {
+      const res = await fetch("/api/signaling?action=create-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, hostId }),
@@ -371,7 +371,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       pollRef.current = setInterval(async () => {
         try {
           const r = await fetch(
-            `/api/join-requests?session=${encodeURIComponent(name)}&hostId=${encodeURIComponent(hostId)}`,
+            `/api/signaling?action=join-requests&session=${encodeURIComponent(name)}&hostId=${encodeURIComponent(hostId)}`,
           );
           const d = await r.json();
           if (d.ok && d.requests.length > 0) {
@@ -468,7 +468,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
       // Submit offer to server
       try {
-        const res = await fetch("/api/join", {
+        const res = await fetch("/api/signaling?action=join", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ session: name, peerId, offer: offerString }),
@@ -524,7 +524,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
         try {
           const r = await fetch(
-            `/api/get-answer?session=${encodeURIComponent(name)}&peerId=${encodeURIComponent(peerId)}`,
+            `/api/signaling?action=get-answer&session=${encodeURIComponent(name)}&peerId=${encodeURIComponent(peerId)}`,
           );
           const d = await r.json();
           if (d.ok && d.answer) {
@@ -573,7 +573,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
     // Delete session on server if host
     if (isHostRef.current && sessionName && hostIdRef.current) {
-      fetch("/api/delete-session", {
+      fetch("/api/signaling?action=delete-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
