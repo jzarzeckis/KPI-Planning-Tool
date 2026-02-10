@@ -55,27 +55,19 @@ export function ConnectionPanel() {
     peerCount,
     peers,
     errorMessage,
-    hostSession,
-    joinSession,
+    connectToSession,
     leaveSession,
   } = useStore();
 
-  const [mode, setMode] = useState<"none" | "host" | "join">("none");
   const [nameInput, setNameInput] = useState("");
 
-  const handleHost = async () => {
+  const handleConnect = async () => {
     if (!nameInput.trim()) return;
-    await hostSession(nameInput.trim());
+    await connectToSession(nameInput.trim());
     setNameInput("");
   };
 
-  const handleJoin = async () => {
-    if (!nameInput.trim()) return;
-    await joinSession(nameInput.trim());
-    setNameInput("");
-  };
-
-  // Connected / hosting state — compact header + peer chips
+  // Connected / hosting state
   if (sessionState === "hosting" || sessionState === "connected") {
     return (
       <div className="rounded-lg border bg-card text-sm">
@@ -114,14 +106,12 @@ export function ConnectionPanel() {
     );
   }
 
-  // Joining state — spinner
-  if (sessionState === "joining" || sessionState === "creating") {
+  // Connecting state
+  if (sessionState === "connecting") {
     return (
       <div className="flex items-center gap-3 px-4 py-3 rounded-lg border bg-card text-sm">
         <span className="text-amber-500 font-medium animate-pulse">
-          {sessionState === "creating"
-            ? "Creating session..."
-            : "Connecting..."}
+          Connecting...
         </span>
         {sessionName && (
           <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
@@ -138,7 +128,7 @@ export function ConnectionPanel() {
     );
   }
 
-  // Idle / error — show host or join form
+  // Idle — single input to enter session name
   return (
     <div className="space-y-4 rounded-lg border bg-card p-4 text-sm">
       <div className="flex items-center justify-between">
@@ -161,94 +151,29 @@ export function ConnectionPanel() {
         </div>
       )}
 
-      {mode === "none" && (
+      <div className="space-y-2">
+        <label className="text-xs font-medium text-muted-foreground">
+          Enter a session name to host or join:
+        </label>
         <div className="flex gap-2">
-          <button
-            onClick={() => setMode("host")}
-            className="flex-1 rounded-md bg-primary px-3 py-2 text-primary-foreground font-medium hover:bg-primary/90 transition-colors"
-          >
-            Host a session
-          </button>
-          <button
-            onClick={() => setMode("join")}
-            className="flex-1 rounded-md border px-3 py-2 font-medium hover:bg-accent transition-colors"
-          >
-            Join a session
-          </button>
-        </div>
-      )}
-
-      {mode === "host" && (
-        <div className="space-y-2">
-          <label className="text-xs font-medium text-muted-foreground">
-            Choose a session name:
-          </label>
-          <div className="flex gap-2">
-            <input
-              className="flex-1 rounded-md border px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-primary"
-              placeholder="e.g. q1-planning"
-              value={nameInput}
-              onChange={(e) => setNameInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleHost();
-              }}
-              autoFocus
-            />
-            <button
-              onClick={handleHost}
-              disabled={!nameInput.trim()}
-              className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors"
-            >
-              Create
-            </button>
-          </div>
-          <button
-            onClick={() => {
-              setMode("none");
-              setNameInput("");
+          <input
+            className="flex-1 rounded-md border px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-primary"
+            placeholder="e.g. q1-planning"
+            value={nameInput}
+            onChange={(e) => setNameInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleConnect();
             }}
-            className="text-xs text-muted-foreground hover:text-foreground underline"
-          >
-            Cancel
-          </button>
-        </div>
-      )}
-
-      {mode === "join" && (
-        <div className="space-y-2">
-          <label className="text-xs font-medium text-muted-foreground">
-            Enter the session name:
-          </label>
-          <div className="flex gap-2">
-            <input
-              className="flex-1 rounded-md border px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-primary"
-              placeholder="e.g. q1-planning"
-              value={nameInput}
-              onChange={(e) => setNameInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleJoin();
-              }}
-              autoFocus
-            />
-            <button
-              onClick={handleJoin}
-              disabled={!nameInput.trim()}
-              className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors"
-            >
-              Join
-            </button>
-          </div>
+          />
           <button
-            onClick={() => {
-              setMode("none");
-              setNameInput("");
-            }}
-            className="text-xs text-muted-foreground hover:text-foreground underline"
+            onClick={handleConnect}
+            disabled={!nameInput.trim()}
+            className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors"
           >
-            Cancel
+            Connect
           </button>
         </div>
-      )}
+      </div>
     </div>
   );
 }

@@ -4,6 +4,9 @@
  * Architecture: Star topology. The host maintains a data channel to each joiner
  * and relays yjs updates between them. Joiners only connect to the host.
  *
+ * Protocol: Host pre-creates WebRTC offers. Joiners read an offer instantly,
+ * create an answer, and post it back. Only the host polls (for answers).
+ *
  * Persistence: 2s debounced localStorage save on every Y.Doc update.
  */
 
@@ -45,9 +48,8 @@ export interface TreeNode {
 
 export type SessionState =
   | "idle"
-  | "creating"
+  | "connecting"
   | "hosting"
-  | "joining"
   | "connected"
   | "error";
 
@@ -112,7 +114,7 @@ function getRootIds(nodesMap: Y.Map<Y.Map<unknown>>): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// Peer tracking (used by host)
+// Peer tracking
 // ---------------------------------------------------------------------------
 
 export type PeerStatus = "connecting" | "connected" | "disconnected";
@@ -145,8 +147,7 @@ interface StoreCtx {
   peers: PeerInfo[];
   errorMessage: string | null;
 
-  hostSession: (name: string) => Promise<void>;
-  joinSession: (name: string) => Promise<void>;
+  connectToSession: (name: string) => Promise<void>;
   leaveSession: () => void;
 
   getNode: (id: string) => TreeNode | null;
@@ -196,13 +197,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [peers, setPeers] = useState<PeerInfo[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Host identity (random per session, used to authenticate polling)
   const hostIdRef = useRef<string | null>(null);
-  // All peer connections (host keeps many, joiner keeps one)
   const peersRef = useRef<Map<string, PeerEntry>>(new Map());
-  // Polling interval refs
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  // Track if this instance is the host
   const isHostRef = useRef(false);
 
   // Load from localStorage on mount
@@ -226,7 +223,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
   }, [doc]);
 
-  // -- Broadcast to peers (host sends to all, joiner sends to host) ---------
+  // -- Broadcast to peers ---------------------------------------------------
 
   const broadcastUpdate = useCallback(
     (update: Uint8Array, excludePeerId?: string) => {
@@ -240,7 +237,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [],
   );
 
-  // Send local yjs updates to peers
   useEffect(() => {
     const handler = (update: Uint8Array, origin: unknown) => {
       if (origin === "remote") return;
@@ -267,19 +263,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const makeHostOnMessage = useCallback(
     (fromPeerId: string) => (data: Uint8Array) => {
-      // Apply to local doc
       Y.applyUpdate(doc, data, "remote");
-      // Relay to all OTHER peers
       broadcastUpdate(data, fromPeerId);
     },
     [doc, broadcastUpdate],
   );
 
-  // -- Host: process a single join request ----------------------------------
+  // -- Host: create a new offer and post it to the server -------------------
 
-  const handleJoinRequest = useCallback(
-    async (peerId: string, offerString: string, name: string) => {
-      // Track peer immediately as "connecting"
+  const createAndPostOffer = useCallback(
+    async (
+      name: string,
+      hostId: string,
+    ): Promise<{ pc: RTCPeerConnection; dc: RTCDataChannel } | null> => {
+      const peerId = crypto.randomUUID();
+
+      // Track as connecting
       const entry: PeerEntry = {
         peerId,
         pc: null!,
@@ -289,289 +288,308 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       peersRef.current.set(peerId, entry);
       updatePeersState();
 
-      const {
-        pc,
-        dc: dcPromise,
-        answerString,
-      } = await acceptOffer(
-        offerString,
-        makeHostOnMessage(peerId),
-        () => {
-          // onOpen: send full doc state
-          const peer = peersRef.current.get(peerId);
-          if (peer) {
-            peer.status = "connected";
-            if (peer.dc && peer.dc.readyState === "open") {
-              peer.dc.send(Y.encodeStateAsUpdate(doc));
-            }
-          }
-          updatePeersState();
-        },
-        () => {
-          // onClose: mark as disconnected (don't delete)
-          const peer = peersRef.current.get(peerId);
-          if (peer) {
-            peer.pc.close();
-            peer.status = "disconnected";
-            peer.disconnectedAt = Date.now();
-          }
-          updatePeersState();
-        },
-      );
-
-      entry.pc = pc;
-
-      // Post answer to server
-      await fetch("/api/signaling?action=submit-answer", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          session: name,
-          peerId,
-          answer: answerString,
-        }),
-      });
-
-      // dc resolves when data channel opens
-      dcPromise.then((dc) => {
-        entry.dc = dc;
-        updatePeersState();
-      });
-    },
-    [doc, makeHostOnMessage, updatePeersState],
-  );
-
-  // -- Host session ---------------------------------------------------------
-
-  const hostSession = useCallback(
-    async (name: string) => {
-      setSessionState("creating");
-      setErrorMessage(null);
-
-      const hostId = crypto.randomUUID();
-      hostIdRef.current = hostId;
-      isHostRef.current = true;
-
-      const res = await fetch("/api/signaling?action=create-session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, hostId }),
-      });
-      const data = await res.json();
-      if (!data.ok) {
-        setSessionState("error");
-        setErrorMessage(data.error ?? "Failed to create session");
-        return;
-      }
-
-      setSessionName(name);
-      setSessionState("hosting");
-
-      // Poll for join requests every 2s
-      pollRef.current = setInterval(async () => {
-        try {
-          const r = await fetch(
-            `/api/signaling?action=join-requests&session=${encodeURIComponent(name)}&hostId=${encodeURIComponent(hostId)}`,
-          );
-          const d = await r.json();
-          if (d.ok && d.requests.length > 0) {
-            for (const req of d.requests) {
-              handleJoinRequest(req.peerId, req.offer, name);
-            }
-          }
-        } catch {
-          // Silently retry on next poll
-        }
-      }, 2000);
-    },
-    [handleJoinRequest],
-  );
-
-  // -- Join session ---------------------------------------------------------
-
-  // Track whether the joiner is supposed to stay in this session
-  // (so reconnect logic knows when to stop)
-  const joinedSessionRef = useRef<string | null>(null);
-
-  // Monotonically increasing attempt ID so stale callbacks are no-ops
-  const joinAttemptRef = useRef(0);
-
-  /** Clean up any existing joiner connection state before a new attempt. */
-  const cleanupJoinerState = useCallback(() => {
-    if (pollRef.current) {
-      clearInterval(pollRef.current);
-      pollRef.current = null;
-    }
-    const hostEntry = peersRef.current.get("host");
-    if (hostEntry) {
-      hostEntry.pc.close();
-      peersRef.current.delete("host");
-    }
-  }, []);
-
-  /** Core connection attempt for a joiner. */
-  const attemptJoinConnection = useCallback(
-    async (name: string): Promise<void> => {
-      const attemptId = ++joinAttemptRef.current;
-      const isStale = () =>
-        joinAttemptRef.current !== attemptId ||
-        joinedSessionRef.current !== name;
-
-      // Clean up previous attempt
-      cleanupJoinerState();
-
-      const peerId = crypto.randomUUID();
-
       let pc: RTCPeerConnection;
       let dc: RTCDataChannel;
       let offerString: string;
       try {
         const result = await createOffer(
-          (data) => Y.applyUpdate(doc, data, "remote"),
+          makeHostOnMessage(peerId),
           () => {
-            if (isStale()) return;
-            const hostEntry = peersRef.current.get("host");
-            if (hostEntry) hostEntry.status = "connected";
-            setSessionState("connected");
+            // onOpen
+            const peer = peersRef.current.get(peerId);
+            if (peer) {
+              peer.status = "connected";
+              if (peer.dc && peer.dc.readyState === "open") {
+                peer.dc.send(Y.encodeStateAsUpdate(doc));
+              }
+            }
             updatePeersState();
           },
           () => {
-            if (isStale()) return;
-            const hostEntry = peersRef.current.get("host");
-            if (hostEntry) {
-              hostEntry.status = "disconnected";
-              hostEntry.disconnectedAt = Date.now();
+            // onClose
+            const peer = peersRef.current.get(peerId);
+            if (peer) {
+              peer.pc.close();
+              peer.status = "disconnected";
+              peer.disconnectedAt = Date.now();
             }
             updatePeersState();
-            setSessionState("joining");
-            setTimeout(() => {
-              if (!isStale()) attemptJoinConnection(name);
-            }, 3000);
           },
         );
         pc = result.pc;
         dc = result.dc;
         offerString = result.offerString;
       } catch {
-        if (!isStale()) {
-          setTimeout(() => {
-            if (!isStale()) attemptJoinConnection(name);
-          }, 3000);
-        }
-        return;
+        peersRef.current.delete(peerId);
+        updatePeersState();
+        return null;
       }
 
-      if (isStale()) {
-        pc.close();
-        return;
-      }
+      entry.pc = pc;
+      entry.dc = dc;
 
-      // Submit offer to server
-      try {
-        const res = await fetch("/api/signaling?action=join", {
+      // Post offer to server (either create-session or replace-offer)
+      const isFirst = !hostIdRef.current;
+      if (isFirst) {
+        hostIdRef.current = hostId;
+        const res = await fetch("/api/signaling?action=create-session", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ session: name, peerId, offer: offerString }),
+          body: JSON.stringify({ name, hostId, offer: offerString }),
         });
         const data = await res.json();
         if (!data.ok) {
           pc.close();
-          if (!isStale()) {
-            setTimeout(() => {
-              if (!isStale()) attemptJoinConnection(name);
-            }, 3000);
-          }
-          return;
+          peersRef.current.delete(peerId);
+          updatePeersState();
+          return null;
         }
-      } catch {
-        pc.close();
-        if (!isStale()) {
-          setTimeout(() => {
-            if (!isStale()) attemptJoinConnection(name);
-          }, 3000);
-        }
-        return;
+      } else {
+        await fetch("/api/signaling?action=replace-offer", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            session: name,
+            hostId,
+            offer: offerString,
+          }),
+        });
       }
 
-      if (isStale()) {
-        pc.close();
-        return;
-      }
+      return { pc, dc };
+    },
+    [doc, makeHostOnMessage, updatePeersState],
+  );
 
-      peersRef.current.set("host", {
-        peerId: "host",
-        pc,
-        dc,
-        status: "connecting",
-      });
-      updatePeersState();
+  // -- Host: poll for answers and cycle offers ------------------------------
 
-      // Poll for answer every 1s, with a 30s timeout
-      let attempts = 0;
+  const startHostPolling = useCallback(
+    (
+      name: string,
+      hostId: string,
+      currentPc: RTCPeerConnection,
+      currentPeerId: string,
+    ) => {
+      if (pollRef.current) clearInterval(pollRef.current);
+
       pollRef.current = setInterval(async () => {
-        attempts++;
-        if (isStale() || attempts > 30) {
-          clearInterval(pollRef.current!);
-          pollRef.current = null;
-          pc.close();
-          peersRef.current.delete("host");
-          if (!isStale()) {
-            setTimeout(() => {
-              if (!isStale()) attemptJoinConnection(name);
-            }, 3000);
-          }
-          return;
-        }
         try {
           const r = await fetch(
-            `/api/signaling?action=get-answer&session=${encodeURIComponent(name)}&peerId=${encodeURIComponent(peerId)}`,
+            `/api/signaling?action=poll-answer&session=${encodeURIComponent(name)}&hostId=${encodeURIComponent(hostId)}`,
           );
           const d = await r.json();
-          if (d.ok && d.answer) {
-            clearInterval(pollRef.current!);
-            pollRef.current = null;
-            await acceptAnswer(pc, d.answer);
+          if (d.ok && d.peerId && d.answer) {
+            // Complete handshake with current offer's PC
+            const peer = peersRef.current.get(currentPeerId);
+            if (peer && peer.pc === currentPc) {
+              await acceptAnswer(currentPc, d.answer);
+            }
+
+            // Create next offer for the next joiner
+            const next = await createAndPostOffer(name, hostId);
+            if (next) {
+              // Find the peerId of the new entry
+              const newPeerId = [...peersRef.current.entries()].find(
+                ([, e]) => e.pc === next.pc,
+              )?.[0];
+              if (newPeerId) {
+                // Restart polling with new PC
+                startHostPolling(name, hostId, next.pc, newPeerId);
+              }
+            }
           }
         } catch {
           // Retry on next poll
         }
       }, 1000);
     },
-    [doc, updatePeersState, cleanupJoinerState],
+    [createAndPostOffer],
   );
 
-  const joinSession = useCallback(
-    async (name: string) => {
-      setSessionState("joining");
-      setErrorMessage(null);
-      isHostRef.current = false;
-      joinedSessionRef.current = name;
-      setSessionName(name);
+  // -- Track active session for reconnect -----------------------------------
 
-      attemptJoinConnection(name);
+  const activeSessionRef = useRef<string | null>(null);
+  const connectAttemptRef = useRef(0);
+
+  // -- Connect to session (unified host/join) -------------------------------
+
+  const connectToSession = useCallback(
+    async (name: string) => {
+      const attemptId = ++connectAttemptRef.current;
+      const isStale = () =>
+        connectAttemptRef.current !== attemptId ||
+        activeSessionRef.current !== name;
+
+      setSessionState("connecting");
+      setErrorMessage(null);
+      setSessionName(name);
+      activeSessionRef.current = name;
+
+      // Ask server if session exists
+      let role: "host" | "joiner";
+      let offer: string | undefined;
+      try {
+        const res = await fetch("/api/signaling?action=join-session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name }),
+        });
+        const data = await res.json();
+        if (!data.ok) {
+          // Session busy (no offer ready), retry
+          if (!isStale()) {
+            setTimeout(() => {
+              if (!isStale()) connectToSession(name);
+            }, 1000);
+          }
+          return;
+        }
+        role = data.role;
+        offer = data.offer;
+      } catch {
+        if (!isStale()) {
+          setTimeout(() => {
+            if (!isStale()) connectToSession(name);
+          }, 3000);
+        }
+        return;
+      }
+
+      if (isStale()) return;
+
+      if (role === "host") {
+        // -- Become host --
+        isHostRef.current = true;
+        const hostId = crypto.randomUUID();
+
+        const result = await createAndPostOffer(name, hostId);
+        if (!result) {
+          setSessionState("error");
+          setErrorMessage("Failed to create session");
+          return;
+        }
+
+        if (isStale()) {
+          result.pc.close();
+          return;
+        }
+
+        setSessionState("hosting");
+
+        // Find peerId of the pending offer
+        const peerId = [...peersRef.current.entries()].find(
+          ([, e]) => e.pc === result.pc,
+        )?.[0];
+        if (peerId) {
+          startHostPolling(name, hostId, result.pc, peerId);
+        }
+      } else {
+        // -- Become joiner --
+        isHostRef.current = false;
+        const peerId = crypto.randomUUID();
+
+        let answerString: string;
+        let pc: RTCPeerConnection;
+        let dcPromise: Promise<RTCDataChannel>;
+        try {
+          const result = await acceptOffer(
+            offer!,
+            (data) => Y.applyUpdate(doc, data, "remote"),
+            () => {
+              // onOpen
+              if (isStale()) return;
+              const hostEntry = peersRef.current.get("host");
+              if (hostEntry) hostEntry.status = "connected";
+              setSessionState("connected");
+              updatePeersState();
+            },
+            () => {
+              // onClose — reconnect
+              if (isStale()) return;
+              const hostEntry = peersRef.current.get("host");
+              if (hostEntry) {
+                hostEntry.status = "disconnected";
+                hostEntry.disconnectedAt = Date.now();
+              }
+              updatePeersState();
+              setSessionState("connecting");
+              setTimeout(() => {
+                if (!isStale()) connectToSession(name);
+              }, 3000);
+            },
+          );
+          answerString = result.answerString;
+          pc = result.pc;
+          dcPromise = result.dc;
+        } catch {
+          if (!isStale()) {
+            setTimeout(() => {
+              if (!isStale()) connectToSession(name);
+            }, 3000);
+          }
+          return;
+        }
+
+        if (isStale()) {
+          pc.close();
+          return;
+        }
+
+        // Track host connection
+        peersRef.current.set("host", {
+          peerId: "host",
+          pc,
+          dc: null,
+          status: "connecting",
+        });
+        updatePeersState();
+
+        dcPromise.then((dc) => {
+          const entry = peersRef.current.get("host");
+          if (entry) entry.dc = dc;
+        });
+
+        // Submit answer — no polling needed, connection opens when host accepts
+        try {
+          await fetch("/api/signaling?action=submit-answer", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              session: name,
+              peerId,
+              answer: answerString,
+            }),
+          });
+        } catch {
+          pc.close();
+          peersRef.current.delete("host");
+          updatePeersState();
+          if (!isStale()) {
+            setTimeout(() => {
+              if (!isStale()) connectToSession(name);
+            }, 3000);
+          }
+        }
+      }
     },
-    [attemptJoinConnection],
+    [doc, createAndPostOffer, startHostPolling, updatePeersState],
   );
 
   // -- Leave session --------------------------------------------------------
 
   const leaveSession = useCallback(() => {
-    // Stop reconnect loop for joiners
-    joinedSessionRef.current = null;
+    activeSessionRef.current = null;
 
-    // Stop polling
     if (pollRef.current) {
       clearInterval(pollRef.current);
       pollRef.current = null;
     }
 
-    // Close all peer connections
     for (const peer of peersRef.current.values()) {
       peer.pc.close();
     }
     peersRef.current.clear();
 
-    // Delete session on server if host
     if (isHostRef.current && sessionName && hostIdRef.current) {
       fetch("/api/signaling?action=delete-session", {
         method: "POST",
@@ -730,8 +748,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         peerCount,
         peers,
         errorMessage,
-        hostSession,
-        joinSession,
+        connectToSession,
         leaveSession,
         getNode,
         getRootIds: getRootIdsFn,

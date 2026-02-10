@@ -1,17 +1,10 @@
-/**
- * Single serverless function handling all signaling API routes.
- *
- * All routes share this function instance so the in-memory session Map
- * is consistent across requests (within the same Vercel instance).
- */
-
 import {
+  joinSession,
   createSession,
   deleteSession,
-  submitJoinRequest,
-  getJoinRequests,
   submitAnswer,
-  getAnswer,
+  pollAnswer,
+  replaceOffer,
 } from "./_signaling";
 
 export default {
@@ -24,32 +17,30 @@ export default {
       const body = await request.json();
 
       switch (action) {
-        case "create-session": {
-          const { name, hostId } = body as { name: string; hostId: string };
-          if (!name || !hostId) {
+        case "join-session": {
+          const { name } = body as { name: string };
+          if (!name)
             return Response.json(
-              { ok: false, error: "name and hostId required" },
+              { ok: false, error: "name required" },
               { status: 400 },
             );
-          }
-          const result = createSession(name, hostId);
-          return Response.json(result, { status: result.ok ? 201 : 409 });
+          const result = joinSession(name);
+          return Response.json(result, { status: result.ok ? 200 : 409 });
         }
 
-        case "join": {
-          const { session, peerId, offer } = body as {
-            session: string;
-            peerId: string;
+        case "create-session": {
+          const { name, hostId, offer } = body as {
+            name: string;
+            hostId: string;
             offer: string;
           };
-          if (!session || !peerId || !offer) {
+          if (!name || !hostId || !offer)
             return Response.json(
-              { ok: false, error: "session, peerId, and offer required" },
+              { ok: false, error: "name, hostId, and offer required" },
               { status: 400 },
             );
-          }
-          const result = submitJoinRequest(session, peerId, offer);
-          return Response.json(result, { status: result.ok ? 200 : 404 });
+          const result = createSession(name, hostId, offer);
+          return Response.json(result, { status: result.ok ? 201 : 409 });
         }
 
         case "submit-answer": {
@@ -58,24 +49,37 @@ export default {
             peerId: string;
             answer: string;
           };
-          if (!session || !peerId || !answer) {
+          if (!session || !peerId || !answer)
             return Response.json(
               { ok: false, error: "session, peerId, and answer required" },
               { status: 400 },
             );
-          }
           const result = submitAnswer(session, peerId, answer);
+          return Response.json(result, { status: result.ok ? 200 : 404 });
+        }
+
+        case "replace-offer": {
+          const { session, hostId, offer } = body as {
+            session: string;
+            hostId: string;
+            offer: string;
+          };
+          if (!session || !hostId || !offer)
+            return Response.json(
+              { ok: false, error: "session, hostId, and offer required" },
+              { status: 400 },
+            );
+          const result = replaceOffer(session, hostId, offer);
           return Response.json(result, { status: result.ok ? 200 : 404 });
         }
 
         case "delete-session": {
           const { name, hostId } = body as { name: string; hostId: string };
-          if (!name || !hostId) {
+          if (!name || !hostId)
             return Response.json(
               { ok: false, error: "name and hostId required" },
               { status: 400 },
             );
-          }
           const ok = deleteSession(name, hostId);
           return Response.json({ ok }, { status: ok ? 200 : 404 });
         }
@@ -84,34 +88,23 @@ export default {
 
     if (method === "GET") {
       switch (action) {
-        case "join-requests": {
+        case "poll-answer": {
           const session = url.searchParams.get("session");
           const hostId = url.searchParams.get("hostId");
-          if (!session || !hostId) {
+          if (!session || !hostId)
             return Response.json(
               { ok: false, error: "session and hostId required" },
               { status: 400 },
             );
-          }
-          const result = getJoinRequests(session, hostId);
-          return Response.json(result, { status: result.ok ? 200 : 404 });
-        }
-
-        case "get-answer": {
-          const session = url.searchParams.get("session");
-          const peerId = url.searchParams.get("peerId");
-          if (!session || !peerId) {
-            return Response.json(
-              { ok: false, error: "session and peerId required" },
-              { status: 400 },
-            );
-          }
-          const result = getAnswer(session, peerId);
+          const result = pollAnswer(session, hostId);
           return Response.json(result, { status: result.ok ? 200 : 404 });
         }
       }
     }
 
-    return Response.json({ ok: false, error: "Unknown action" }, { status: 400 });
+    return Response.json(
+      { ok: false, error: "Unknown action" },
+      { status: 400 },
+    );
   },
 };
