@@ -1,4 +1,4 @@
-import { deleteSession } from "../_signaling";
+import { deleteSession } from "../../_signaling";
 
 export default {
   async fetch(request: Request) {
