@@ -54,3 +54,17 @@
 [debug] [2026-02-10T11:26:05.450Z] > authorizing via signed-in user (natrixnatrix89@gmail.com)
 [debug] [2026-02-10T11:26:05.451Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
 [debug] [2026-02-10T11:26:05.451Z] > authorizing via signed-in user (natrixnatrix89@gmail.com)
+[debug] [2026-02-10T17:04:50.321Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-02-10T17:04:50.323Z] > authorizing via signed-in user (natrixnatrix89@gmail.com)
+[debug] [2026-02-10T17:04:50.323Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-02-10T17:04:50.323Z] > authorizing via signed-in user (natrixnatrix89@gmail.com)
+[debug] [2026-02-10T17:04:50.332Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-02-10T17:04:50.332Z] > authorizing via signed-in user (natrixnatrix89@gmail.com)
+[debug] [2026-02-10T17:04:50.417Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-02-10T17:04:50.417Z] > authorizing via signed-in user (natrixnatrix89@gmail.com)
+[debug] [2026-02-10T17:04:50.418Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-02-10T17:04:50.418Z] > authorizing via signed-in user (natrixnatrix89@gmail.com)
+[debug] [2026-02-10T17:04:50.424Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-02-10T17:04:50.424Z] > authorizing via signed-in user (natrixnatrix89@gmail.com)
+[debug] [2026-02-10T17:04:50.425Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-02-10T17:04:50.425Z] > authorizing via signed-in user (natrixnatrix89@gmail.com)

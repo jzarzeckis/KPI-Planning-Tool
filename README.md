@@ -127,3 +127,8 @@ src/
 ├── TreeNode.tsx       # Recursive tree node component
 └── App.tsx            # Main application shell
 ```
+
+## TODOs
+
+- [ ] Many-to-many relationships - there can be initiatives that drive many KPIs, And KPIs can be driven by many initiatives
+- [ ] Sankey chart to visualise the relationship of expected gains

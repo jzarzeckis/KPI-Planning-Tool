@@ -19,12 +19,15 @@ interface Session {
 
 const sessions = new Map<string, Session>();
 
-// -- Cleanup ----------------------------------------------------------------
+// -- Constants --------------------------------------------------------------
 
 const SESSION_MAX_AGE_MS = 30 * 60 * 1000; // 30 minutes
 const HOST_POLL_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes without polling → stale
+const STALE_HOST_THRESHOLD_MS = 10_000; // 10s without poll → can be taken over
 
-setInterval(() => {
+// -- Cleanup ----------------------------------------------------------------
+
+export function cleanup() {
   const now = Date.now();
   for (const [name, session] of sessions) {
     if (
@@ -34,7 +37,10 @@ setInterval(() => {
       sessions.delete(name);
     }
   }
-}, 60_000);
+}
+
+// Start periodic cleanup (harmless in serverless — interval won't fire between invocations)
+setInterval(cleanup, 60_000);
 
 // -- Public API -------------------------------------------------------------
 
@@ -45,12 +51,13 @@ export function joinSession(
   | { ok: true; role: "host" }
   | { ok: true; role: "joiner"; offer: string }
   | { ok: false; error: string } {
+  cleanup();
   const existing = sessions.get(name);
   if (!existing) {
     return { ok: true, role: "host" };
   }
   // Session exists but host stopped polling (stale) — take over
-  if (Date.now() - existing.lastHostPoll > 10_000) {
+  if (Date.now() - existing.lastHostPoll > STALE_HOST_THRESHOLD_MS) {
     sessions.delete(name);
     return { ok: true, role: "host" };
   }
@@ -72,8 +79,7 @@ export function createSession(
 ): { ok: true } | { ok: false; error: string } {
   const existing = sessions.get(name);
   if (existing) {
-    const stale = Date.now() - existing.lastHostPoll > 10_000;
-    if (!stale) {
+    if (Date.now() - existing.lastHostPoll <= STALE_HOST_THRESHOLD_MS) {
       return { ok: false, error: "Session name already taken" };
     }
   }
@@ -137,9 +143,14 @@ export function replaceOffer(
 }
 
 /** Delete a session. */
-export function deleteSession(name: string, hostId: string): boolean {
+export function deleteSession(
+  name: string,
+  hostId: string,
+): { ok: true } | { ok: false; error: string } {
   const session = sessions.get(name);
-  if (!session || session.hostId !== hostId) return false;
+  if (!session || session.hostId !== hostId) {
+    return { ok: false, error: "Session not found or not the host" };
+  }
   sessions.delete(name);
-  return true;
+  return { ok: true };
 }

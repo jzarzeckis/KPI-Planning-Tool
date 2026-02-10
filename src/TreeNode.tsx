@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   useYjsSnapshot,
   useStore,
@@ -33,6 +33,9 @@ const kindBadgeColors: Record<NodeKind, string> = {
   kpi: "bg-amber-100 text-amber-700",
   initiative: "bg-emerald-100 text-emerald-700",
 };
+
+// Module-level signal: which node ID should be auto-focused on mount
+let pendingFocusId: string | null = null;
 
 // ---------------------------------------------------------------------------
 // Component
@@ -78,26 +81,22 @@ function TreeNodeInner({
   toggleNode: (id: string) => void;
   setWeight: (id: string, w: number) => void;
 }) {
-  const [isEditing, setIsEditing] = useState(false);
-  const [draft, setDraft] = useState(node.name);
   const [showLog, setShowLog] = useState(false);
-  const [newChildName, setNewChildName] = useState("");
-  const [showAddChild, setShowAddChild] = useState(false);
-
+  const nameRef = useRef<HTMLInputElement>(null);
   const nextKind = childKind[node.kind];
 
-  const handleRename = () => {
-    if (draft.trim() && draft !== node.name) {
-      renameNode(node.id, draft.trim());
+  // Auto-focus newly created nodes
+  useEffect(() => {
+    if (pendingFocusId === node.id && nameRef.current) {
+      nameRef.current.focus();
+      nameRef.current.select();
+      pendingFocusId = null;
     }
-    setIsEditing(false);
-  };
+  }, [node.id]);
 
   const handleAddChild = () => {
-    if (!newChildName.trim()) return;
-    addNode(node.id, nextKind, newChildName.trim());
-    setNewChildName("");
-    setShowAddChild(false);
+    const id = addNode(node.id, nextKind, "");
+    pendingFocusId = id;
   };
 
   return (
@@ -128,34 +127,14 @@ function TreeNodeInner({
             {kindLabels[node.kind]}
           </span>
 
-          {/* Name */}
-          {isEditing ? (
-            <input
-              className="flex-1 bg-transparent border-b border-primary px-1 py-0.5 text-sm font-medium outline-none"
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onBlur={handleRename}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleRename();
-                if (e.key === "Escape") {
-                  setDraft(node.name);
-                  setIsEditing(false);
-                }
-              }}
-              autoFocus
-            />
-          ) : (
-            <span
-              className="flex-1 text-sm font-medium cursor-pointer hover:underline truncate"
-              onClick={() => {
-                setDraft(node.name);
-                setIsEditing(true);
-              }}
-              title="Click to rename"
-            >
-              {node.name}
-            </span>
-          )}
+          {/* Name — always an editable input, syncs on every keystroke */}
+          <input
+            ref={nameRef}
+            className="flex-1 bg-transparent px-1 py-0.5 text-sm font-medium outline-none border-b border-transparent focus:border-primary transition-colors"
+            value={node.name}
+            onChange={(e) => renameNode(node.id, e.target.value)}
+            placeholder={`${kindLabels[node.kind]} name...`}
+          />
 
           {/* Weight slider (only for KPIs) */}
           {node.kind === "kpi" && (
@@ -177,9 +156,9 @@ function TreeNodeInner({
           )}
 
           {/* Actions */}
-          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
             <button
-              onClick={() => setShowAddChild(!showAddChild)}
+              onClick={handleAddChild}
               className="rounded p-1 text-xs hover:bg-accent transition-colors"
               title={`Add ${kindLabels[nextKind]}`}
             >
@@ -194,33 +173,6 @@ function TreeNodeInner({
             </button>
           </div>
         </div>
-
-        {/* Add child inline */}
-        {showAddChild && (
-          <div className="flex items-center gap-1.5 mt-2 ml-6">
-            <span className="text-xs text-muted-foreground">
-              New {kindLabels[nextKind].toLowerCase()}:
-            </span>
-            <input
-              className="flex-1 rounded border px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-primary"
-              placeholder={`${kindLabels[nextKind]} name...`}
-              value={newChildName}
-              onChange={(e) => setNewChildName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleAddChild();
-                if (e.key === "Escape") setShowAddChild(false);
-              }}
-              autoFocus
-            />
-            <button
-              onClick={handleAddChild}
-              disabled={!newChildName.trim()}
-              className="rounded bg-primary px-2 py-1 text-xs text-primary-foreground font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors"
-            >
-              Add
-            </button>
-          </div>
-        )}
 
         {/* Action log */}
         {showLog && node.log.length > 0 && (
@@ -251,4 +203,8 @@ function TreeNodeInner({
       )}
     </div>
   );
+}
+
+export function setPendingFocusId(id: string) {
+  pendingFocusId = id;
 }

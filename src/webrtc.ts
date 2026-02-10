@@ -116,7 +116,11 @@ export function encode(blob: SignalBlob): string {
 }
 
 export function decode(str: string): SignalBlob {
-  return JSON.parse(atob(str)) as SignalBlob;
+  try {
+    return JSON.parse(atob(str)) as SignalBlob;
+  } catch {
+    throw new Error("Invalid signaling data");
+  }
 }
 
 function setupDataChannel(
@@ -144,6 +148,9 @@ function waitForIceGathering(pc: RTCPeerConnection): Promise<void> {
       }
     };
     pc.addEventListener("icegatheringstatechange", check);
-    setTimeout(resolve, 3000);
+    setTimeout(() => {
+      pc.removeEventListener("icegatheringstatechange", check);
+      resolve();
+    }, 3000);
   });
 }
