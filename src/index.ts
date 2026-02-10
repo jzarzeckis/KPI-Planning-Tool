@@ -11,7 +11,7 @@ import {
 
 const server = serve({
   routes: {
-    "/api/sessions": {
+    "/api/create-session": {
       async POST(req) {
         const { name, hostId } = (await req.json()) as {
           name: string;
@@ -28,65 +28,87 @@ const server = serve({
       },
     },
 
-    "/api/sessions/:name/join": {
+    "/api/join": {
       async POST(req) {
-        const { peerId, offer } = (await req.json()) as {
+        const { session, peerId, offer } = (await req.json()) as {
+          session: string;
           peerId: string;
           offer: string;
         };
-        if (!peerId || !offer) {
+        if (!session || !peerId || !offer) {
           return Response.json(
-            { ok: false, error: "peerId and offer required" },
+            { ok: false, error: "session, peerId, and offer required" },
             { status: 400 },
           );
         }
-        const result = submitJoinRequest(req.params.name, peerId, offer);
+        const result = submitJoinRequest(session, peerId, offer);
         return Response.json(result, { status: result.ok ? 200 : 404 });
       },
     },
 
-    "/api/sessions/:name/join-requests": {
+    "/api/join-requests": {
       GET(req) {
-        const hostId = new URL(req.url).searchParams.get("hostId");
-        if (!hostId) {
+        const url = new URL(req.url);
+        const session = url.searchParams.get("session");
+        const hostId = url.searchParams.get("hostId");
+        if (!session || !hostId) {
           return Response.json(
-            { ok: false, error: "hostId required" },
+            { ok: false, error: "session and hostId required" },
             { status: 400 },
           );
         }
-        const result = getJoinRequests(req.params.name, hostId);
+        const result = getJoinRequests(session, hostId);
         return Response.json(result, { status: result.ok ? 200 : 404 });
       },
     },
 
-    "/api/sessions/:name/answer/:peerId": {
+    "/api/submit-answer": {
       async POST(req) {
-        const { answer } = (await req.json()) as { answer: string };
-        if (!answer) {
+        const { session, peerId, answer } = (await req.json()) as {
+          session: string;
+          peerId: string;
+          answer: string;
+        };
+        if (!session || !peerId || !answer) {
           return Response.json(
-            { ok: false, error: "answer required" },
+            { ok: false, error: "session, peerId, and answer required" },
             { status: 400 },
           );
         }
-        const result = submitAnswer(req.params.name, req.params.peerId, answer);
-        return Response.json(result, { status: result.ok ? 200 : 404 });
-      },
-      GET(req) {
-        const result = getAnswer(req.params.name, req.params.peerId);
+        const result = submitAnswer(session, peerId, answer);
         return Response.json(result, { status: result.ok ? 200 : 404 });
       },
     },
 
-    "/api/sessions/:name": {
-      DELETE(req) {
-        const hostId = new URL(req.url).searchParams.get("hostId");
-        if (!hostId) {
+    "/api/get-answer": {
+      GET(req) {
+        const url = new URL(req.url);
+        const session = url.searchParams.get("session");
+        const peerId = url.searchParams.get("peerId");
+        if (!session || !peerId) {
           return Response.json(
-            { ok: false, error: "hostId required" },
+            { ok: false, error: "session and peerId required" },
             { status: 400 },
           );
         }
-        const ok = deleteSession(req.params.name, hostId);
+        const result = getAnswer(session, peerId);
+        return Response.json(result, { status: result.ok ? 200 : 404 });
+      },
+    },
+
+    "/api/delete-session": {
+      async POST(req) {
+        const { name, hostId } = (await req.json()) as {
+          name: string;
+          hostId: string;
+        };
+        if (!name || !hostId) {
+          return Response.json(
+            { ok: false, error: "name and hostId required" },
+            { status: 400 },
+          );
+        }
+        const ok = deleteSession(name, hostId);
         return Response.json({ ok }, { status: ok ? 200 : 404 });
       },
     },

@@ -322,14 +322,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       entry.pc = pc;
 
       // Post answer to server
-      await fetch(
-        `/api/sessions/${encodeURIComponent(name)}/answer/${encodeURIComponent(peerId)}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ answer: answerString }),
-        },
-      );
+      await fetch("/api/submit-answer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session: name,
+          peerId,
+          answer: answerString,
+        }),
+      });
 
       // dc resolves when data channel opens
       dcPromise.then((dc) => {
@@ -351,7 +352,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       hostIdRef.current = hostId;
       isHostRef.current = true;
 
-      const res = await fetch("/api/sessions", {
+      const res = await fetch("/api/create-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, hostId }),
@@ -370,7 +371,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       pollRef.current = setInterval(async () => {
         try {
           const r = await fetch(
-            `/api/sessions/${encodeURIComponent(name)}/join-requests?hostId=${encodeURIComponent(hostId)}`,
+            `/api/join-requests?session=${encodeURIComponent(name)}&hostId=${encodeURIComponent(hostId)}`,
           );
           const d = await r.json();
           if (d.ok && d.requests.length > 0) {
@@ -467,14 +468,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
       // Submit offer to server
       try {
-        const res = await fetch(
-          `/api/sessions/${encodeURIComponent(name)}/join`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ peerId, offer: offerString }),
-          },
-        );
+        const res = await fetch("/api/join", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session: name, peerId, offer: offerString }),
+        });
         const data = await res.json();
         if (!data.ok) {
           pc.close();
@@ -526,7 +524,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
         try {
           const r = await fetch(
-            `/api/sessions/${encodeURIComponent(name)}/answer/${encodeURIComponent(peerId)}`,
+            `/api/get-answer?session=${encodeURIComponent(name)}&peerId=${encodeURIComponent(peerId)}`,
           );
           const d = await r.json();
           if (d.ok && d.answer) {
@@ -575,10 +573,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
     // Delete session on server if host
     if (isHostRef.current && sessionName && hostIdRef.current) {
-      fetch(
-        `/api/sessions/${encodeURIComponent(sessionName)}?hostId=${encodeURIComponent(hostIdRef.current)}`,
-        { method: "DELETE" },
-      ).catch(() => {});
+      fetch("/api/delete-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: sessionName,
+          hostId: hostIdRef.current,
+        }),
+      }).catch(() => {});
     }
 
     hostIdRef.current = null;
