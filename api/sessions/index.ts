@@ -1,4 +1,4 @@
-import { createSession } from "./_signaling";
+import { createSession } from "../_signaling";
 
 export default {
   async fetch(request: Request) {
